@@ -163,6 +163,14 @@ local function get_provider()
         )
       end
     end
+  elseif defaults.provider == "tmux" then
+    local tmux_provider = load_provider("tmux")
+    if tmux_provider and tmux_provider.is_available() then
+      logger.debug("terminal", "Using tmux terminal provider")
+      return tmux_provider
+    else
+      logger.warn("terminal", "'tmux' provider configured, but not in tmux session. Falling back to 'native'.")
+    end
   elseif defaults.provider == "native" then
     -- noop, will use native provider as default below
     logger.debug("terminal", "Using native terminal provider")
@@ -299,17 +307,25 @@ local function get_claude_command_and_env(cmd_args)
     base_cmd = cmd_from_config
   end
 
-  local cmd_string
-  if cmd_args and cmd_args ~= "" then
-    cmd_string = base_cmd .. " " .. cmd_args
-  else
-    cmd_string = base_cmd
-  end
-
   local sse_port_value = claudecode_server_module.state.port
+
+  -- Add --ide flag when WebSocket server is running to auto-connect to IDE
+  local cmd_string
+  if sse_port_value then
+    if cmd_args and cmd_args ~= "" then
+      cmd_string = base_cmd .. " --ide " .. cmd_args
+    else
+      cmd_string = base_cmd .. " --ide"
+    end
+  else
+    if cmd_args and cmd_args ~= "" then
+      cmd_string = base_cmd .. " " .. cmd_args
+    else
+      cmd_string = base_cmd
+    end
+  end
   local env_table = {
     ENABLE_IDE_INTEGRATION = "true",
-    FORCE_CODE_TERMINAL = "true",
   }
 
   if sse_port_value then
@@ -402,7 +418,7 @@ function M.setup(user_term_config, p_terminal_cmd, p_env)
         )
       end
     elseif k == "provider" then
-      if type(v) == "table" or v == "snacks" or v == "native" or v == "external" or v == "auto" or v == "none" then
+      if type(v) == "table" or v == "snacks" or v == "native" or v == "external" or v == "tmux" or v == "auto" or v == "none" then
         defaults.provider = v
       else
         vim.notify(
