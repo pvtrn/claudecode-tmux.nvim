@@ -171,6 +171,14 @@ local function get_provider()
     else
       logger.warn("terminal", "'tmux' provider configured, but not in tmux session. Falling back to 'native'.")
     end
+  elseif defaults.provider == "zellij" then
+    local zellij_provider = load_provider("zellij")
+    if zellij_provider and zellij_provider.is_available() then
+      logger.debug("terminal", "Using zellij terminal provider")
+      return zellij_provider
+    else
+      logger.warn("terminal", "'zellij' provider configured, but not in zellij session. Falling back to 'native'.")
+    end
   elseif defaults.provider == "native" then
     -- noop, will use native provider as default below
     logger.debug("terminal", "Using native terminal provider")
@@ -418,7 +426,7 @@ function M.setup(user_term_config, p_terminal_cmd, p_env)
         )
       end
     elseif k == "provider" then
-      if type(v) == "table" or v == "snacks" or v == "native" or v == "external" or v == "tmux" or v == "auto" or v == "none" then
+      if type(v) == "table" or v == "snacks" or v == "native" or v == "external" or v == "tmux" or v == "zellij" or v == "auto" or v == "none" then
         defaults.provider = v
       else
         vim.notify(

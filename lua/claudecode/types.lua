@@ -39,7 +39,7 @@
 ---@alias ClaudeCodeSplitSide "left"|"right"
 
 -- In-tree terminal provider names
----@alias ClaudeCodeTerminalProviderName "auto"|"snacks"|"native"|"external"|"tmux"|"none"
+---@alias ClaudeCodeTerminalProviderName "auto"|"snacks"|"native"|"external"|"tmux"|"zellij"|"none"
 
 -- Terminal provider-specific options
 ---@class ClaudeCodeTerminalProviderOptions

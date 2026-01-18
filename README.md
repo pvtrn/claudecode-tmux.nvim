@@ -1,18 +1,18 @@
-# claudecode.nvim (tmux fork)
+# claudecode.nvim (tmux/zellij fork)
 
 [![Tests](https://github.com/coder/claudecode.nvim/actions/workflows/test.yml/badge.svg)](https://github.com/coder/claudecode.nvim/actions/workflows/test.yml)
 ![Neovim version](https://img.shields.io/badge/Neovim-0.8%2B-green)
 ![Status](https://img.shields.io/badge/Status-beta-blue)
 
-> ⚠️ **This is a fork of [greggh/claude-code.nvim](https://github.com/greggh/claude-code.nvim)** with an additional **tmux terminal provider** that solves performance issues with the built-in Neovim terminal.
+> ⚠️ **This is a fork of [greggh/claude-code.nvim](https://github.com/greggh/claude-code.nvim)** with **tmux and zellij terminal providers** that solve performance issues with the built-in Neovim terminal.
 
 ## Why This Fork?
 
-The standard Neovim terminal (`snacks` or `native` providers) can experience **significant lag and freezes** when running Claude Code, especially during heavy output. This fork adds a `tmux` provider that:
+The standard Neovim terminal (`snacks` or `native` providers) can experience **significant lag and freezes** when running Claude Code, especially during heavy output. This fork adds `tmux` and `zellij` providers that:
 
-- 🚀 **Eliminates terminal lag** — Claude runs in a native tmux pane, not emulated in Neovim
+- 🚀 **Eliminates terminal lag** — Claude runs in a native multiplexer pane, not emulated in Neovim
 - 🔄 **Seamless integration** — Full IDE features (file sync, selections, diffs) still work
-- ⚡ **Better performance** — tmux handles terminal rendering natively
+- ⚡ **Better performance** — tmux/zellij handle terminal rendering natively
 
 ### Quick Start with tmux Provider
 
@@ -49,6 +49,26 @@ The standard Neovim terminal (`snacks` or `native` providers) can experience **s
 ```
 
 **Requirements:** Must be running Neovim inside a tmux session.
+
+### Quick Start with Zellij Provider
+
+```lua
+{
+  "pvtrn/claudecode-tmux.nvim",  -- This fork
+  opts = {
+    terminal = {
+      provider = "zellij",         -- Use zellij instead of snacks/native
+      split_side = "right",        -- "left" or "right"
+    },
+  },
+  keys = {
+    { "<leader>ac", "<cmd>ClaudeCode<cr>", desc = "Toggle Claude" },
+    { "<leader>af", "<cmd>ClaudeCodeFocus<cr>", desc = "Focus Claude" },
+  },
+}
+```
+
+**Requirements:** Must be running Neovim inside a Zellij session.
 
 ---
 
@@ -309,7 +329,7 @@ For deep technical details, see [ARCHITECTURE.md](./ARCHITECTURE.md).
     terminal = {
       split_side = "right", -- "left" or "right"
       split_width_percentage = 0.30,
-      provider = "auto", -- "auto", "snacks", "native", "tmux", "external", "none", or custom provider table
+      provider = "auto", -- "auto", "snacks", "native", "tmux", "zellij", "external", "none", or custom provider table
       auto_close = true,
       snacks_win_opts = {}, -- Opts to pass to `Snacks.terminal.open()` - see Floating Window section below
 
@@ -565,6 +585,35 @@ Run Claude Code in a tmux split pane for better performance. This provider elimi
 
 **Why use tmux provider?**
 The built-in Neovim terminal (`snacks` or `native`) emulates a terminal inside Neovim, which can cause performance issues during heavy output from Claude Code. The tmux provider runs Claude in a native tmux pane, letting tmux handle all terminal rendering while maintaining full IDE integration through the WebSocket connection.
+
+### Zellij Provider
+
+Run Claude Code in a Zellij split pane for better performance. Similar to the tmux provider, this eliminates lag issues with Neovim's built-in terminal.
+
+```lua
+{
+  "pvtrn/claudecode-tmux.nvim",
+  opts = {
+    terminal = {
+      provider = "zellij",
+      split_side = "right",           -- "left" or "right"
+    },
+  },
+}
+```
+
+**Features:**
+- Creates a Zellij pane alongside Neovim
+- Full IDE integration (file sync, selections, diffs) works seamlessly
+- Toggle focus between Neovim and Claude with `:ClaudeCodeFocus`
+- Configurable split side
+
+**Requirements:**
+- Neovim must be running inside a Zellij session
+- Zellij 0.32.0+ (uses `zellij run` command)
+
+**Why use Zellij provider?**
+Same benefits as the tmux provider — Claude runs in a native Zellij pane with native terminal rendering, avoiding the performance issues of Neovim's terminal emulation.
 
 ### None (No-Op) Provider
 
