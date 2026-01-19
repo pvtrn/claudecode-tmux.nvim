@@ -280,6 +280,11 @@ local function build_config(opts_override)
     end
   end
 
+  -- Default to Neovim's current working directory if no cwd is configured
+  if not resolved_cwd then
+    resolved_cwd = vim.fn.getcwd()
+  end
+
   return {
     split_side = effective_config.split_side,
     split_width_percentage = effective_config.split_width_percentage,

@@ -157,6 +157,34 @@ function M.open(cmd_string, env_table, effective_config, focus)
     return
   end
 
+  -- Zellij creates panes at 50% by default. We need to resize to match the configured width.
+  -- The resize command is incremental, so we calculate how many steps needed.
+  local width_pct = effective_config.split_width_percentage or config.split_width_percentage or 0.30
+  local target_pct = width_pct * 100 -- e.g., 35
+  local default_pct = 50
+  local diff_pct = default_pct - target_pct -- e.g., 50 - 35 = 15 (need to shrink by 15%)
+
+  if diff_pct > 0 then
+    -- Need to shrink the Claude pane (it's currently focused after creation)
+    -- Each resize step is roughly 5% of terminal width
+    local resize_steps = math.floor(diff_pct / 5)
+    local resize_direction = split_side == "left" and "right" or "left"
+
+    for _ = 1, resize_steps do
+      zellij_cmd({ "action", "resize", "decrease", resize_direction })
+    end
+    logger.debug("terminal", "Resized zellij pane by " .. resize_steps .. " steps")
+  elseif diff_pct < 0 then
+    -- Need to grow the Claude pane
+    local resize_steps = math.floor(math.abs(diff_pct) / 5)
+    local resize_direction = split_side == "left" and "right" or "left"
+
+    for _ = 1, resize_steps do
+      zellij_cmd({ "action", "resize", "increase", resize_direction })
+    end
+    logger.debug("terminal", "Resized zellij pane by " .. resize_steps .. " steps")
+  end
+
   pane_created = true
   logger.debug("terminal", "Created zellij pane")
   logger.debug("terminal", "Environment variables passed: " .. vim.inspect(env_table))
