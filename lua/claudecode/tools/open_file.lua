@@ -67,7 +67,18 @@ local function is_editor_window(win)
     return false
   end
 
-  -- Skip special buffer types
+  -- Dashboard windows are suitable (can be replaced with files)
+  local dashboard_filetypes = {
+    "alpha", "dashboard", "starter", "snacks_dashboard",
+    "ministarter", "lazy", "lazyterm"
+  }
+  for _, ft in ipairs(dashboard_filetypes) do
+    if filetype == ft then
+      return true
+    end
+  end
+
+  -- Skip special buffer types (but not dashboards which we handled above)
   if buftype == "terminal" or buftype == "nofile" or buftype == "prompt" then
     return false
   end
@@ -86,10 +97,32 @@ local function is_editor_window(win)
   return true
 end
 
----Checks if a buffer is empty (no name and no content)
+---Checks if a buffer is a dashboard/starter screen
 ---@param buf integer Buffer ID to check
----@return boolean is_empty True if buffer is empty
+---@return boolean is_dashboard True if buffer is a dashboard
+local function is_dashboard_buffer(buf)
+  local filetype = vim.api.nvim_buf_get_option(buf, "filetype")
+  local dashboard_filetypes = {
+    "alpha", "dashboard", "starter", "snacks_dashboard",
+    "ministarter", "lazy", "lazyterm"
+  }
+  for _, ft in ipairs(dashboard_filetypes) do
+    if filetype == ft then
+      return true
+    end
+  end
+  return false
+end
+
+---Checks if a buffer is empty (no name and no content) or a dashboard
+---@param buf integer Buffer ID to check
+---@return boolean is_empty True if buffer is empty or dashboard
 local function is_buffer_empty(buf)
+  -- Dashboard counts as empty - can be replaced with a file
+  if is_dashboard_buffer(buf) then
+    return true
+  end
+
   local name = vim.api.nvim_buf_get_name(buf)
   if name ~= "" then
     return false
