@@ -14,6 +14,7 @@ M.defaults = {
   env = {}, -- Custom environment variables for Claude terminal
   log_level = "info",
   track_selection = true,
+  agent_instructions = nil, -- Custom instructions for agent (string or file path), nil uses built-in
   -- When true, focus Claude terminal after a successful send while connected
   focus_after_send = false,
   visual_demotion_delay_ms = 50, -- Milliseconds to wait before demoting a visual selection
@@ -154,6 +155,11 @@ function M.validate(config)
   end
   if config.diff_opts.open_in_current_tab ~= nil then
     assert(type(config.diff_opts.open_in_current_tab) == "boolean", "diff_opts.open_in_current_tab must be a boolean")
+  end
+
+  -- Validate agent_instructions
+  if config.agent_instructions ~= nil then
+    assert(type(config.agent_instructions) == "string", "agent_instructions must be a string (text or file path)")
   end
 
   -- Validate env

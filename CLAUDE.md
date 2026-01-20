@@ -89,7 +89,8 @@ The WebSocket server implements secure authentication using:
 
 **MCP-Exposed Tools** (with JSON schemas):
 
-- `openFile` - Opens files with optional line/text selection (startLine/endLine), preview mode, text pattern matching, and makeFrontmost flag
+- `openFile` - Opens files with optional line/text selection (startLine/endLine), preview mode, text pattern matching, makeFrontmost flag, and **split mode** (vertical/horizontal/none, default: vertical)
+- `executeCommand` - Executes arbitrary Neovim Ex commands or Lua code for full editor control
 - `getCurrentSelection` - Gets current text selection from active editor
 - `getLatestSelection` - Gets most recent text selection (even from inactive editors)
 - `getOpenEditors` - Lists currently open files with VS Code-compatible `tabs` structure
@@ -99,6 +100,8 @@ The WebSocket server implements secure authentication using:
 - `getWorkspaceFolders` - Gets workspace folder information
 - `closeAllDiffTabs` - Closes all diff-related tabs and windows
 - `getDiagnostics` - Gets language diagnostics (errors, warnings) from the editor
+
+**Agent Instructions**: See `AGENT_INSTRUCTIONS.md` for detailed usage examples and workflows.
 
 **Internal Tools** (not exposed via MCP):
 

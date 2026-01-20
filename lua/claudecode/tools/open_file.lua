@@ -40,12 +40,142 @@ local schema = {
         description = "Whether to make the file the active editor tab. If false, the file will be opened in the background without changing focus.",
         default = true,
       },
+      split = {
+        type = "string",
+        enum = { "none", "vertical", "horizontal" },
+        description = "How to split the window when opening the file. 'vertical' creates a vertical split (side by side), 'horizontal' creates a horizontal split (stacked). Default is 'vertical' to open files in a new vertical split.",
+        default = "vertical",
+      },
     },
     required = { "filePath" },
     additionalProperties = false,
     ["$schema"] = "http://json-schema.org/draft-07/schema#",
   },
 }
+
+---Checks if a window is a suitable editor window (not terminal, sidebar, floating, etc.)
+---@param win integer Window ID to check
+---@return boolean is_suitable True if window is suitable for editing
+local function is_editor_window(win)
+  local buf = vim.api.nvim_win_get_buf(win)
+  local buftype = vim.api.nvim_buf_get_option(buf, "buftype")
+  local filetype = vim.api.nvim_buf_get_option(buf, "filetype")
+  local win_config = vim.api.nvim_win_get_config(win)
+
+  -- Skip floating windows
+  if win_config.relative and win_config.relative ~= "" then
+    return false
+  end
+
+  -- Skip special buffer types
+  if buftype == "terminal" or buftype == "nofile" or buftype == "prompt" then
+    return false
+  end
+
+  -- Skip known sidebar filetypes
+  local sidebar_filetypes = {
+    "neo-tree", "neo-tree-popup", "NvimTree", "oil",
+    "minifiles", "netrw", "aerial", "tagbar"
+  }
+  for _, ft in ipairs(sidebar_filetypes) do
+    if filetype == ft then
+      return false
+    end
+  end
+
+  return true
+end
+
+---Checks if a buffer is empty (no name and no content)
+---@param buf integer Buffer ID to check
+---@return boolean is_empty True if buffer is empty
+local function is_buffer_empty(buf)
+  local name = vim.api.nvim_buf_get_name(buf)
+  if name ~= "" then
+    return false
+  end
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  return #lines == 1 and lines[1] == ""
+end
+
+---Finds all suitable editor windows and categorizes them.
+---@return table result Table with editor_windows, empty_windows, and total count
+local function analyze_editor_windows()
+  local windows = vim.api.nvim_list_wins()
+  local editor_windows = {}
+  local empty_windows = {}
+
+  for _, win in ipairs(windows) do
+    if is_editor_window(win) then
+      table.insert(editor_windows, win)
+      local buf = vim.api.nvim_win_get_buf(win)
+      if is_buffer_empty(buf) then
+        table.insert(empty_windows, win)
+      end
+    end
+  end
+
+  return {
+    editor_windows = editor_windows,
+    empty_windows = empty_windows,
+    count = #editor_windows,
+  }
+end
+
+---Finds the best window to open a file in, considering existing windows.
+---Prefers empty windows, then reuses existing windows if there are multiple.
+---@param file_path string The file path to open (to check if already open)
+---@param want_split string "none", "vertical", or "horizontal"
+---@return integer? target_win Window to open file in
+---@return boolean should_split Whether to create a new split
+local function find_best_window_for_file(file_path, want_split)
+  local analysis = analyze_editor_windows()
+
+  -- Check if file is already open in a window
+  for _, win in ipairs(analysis.editor_windows) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local buf_name = vim.api.nvim_buf_get_name(buf)
+    if buf_name == file_path then
+      -- File already open, just focus it
+      return win, false
+    end
+  end
+
+  -- If split is "none", just find any editor window
+  if want_split == "none" then
+    if #analysis.editor_windows > 0 then
+      return analysis.editor_windows[1], false
+    end
+    return nil, false
+  end
+
+  -- For split requests: try to reuse empty windows first
+  if #analysis.empty_windows > 0 then
+    -- Use empty window instead of creating split
+    return analysis.empty_windows[1], false
+  end
+
+  -- If there are multiple editor windows, reuse one instead of creating more
+  if #analysis.editor_windows >= 2 then
+    -- Find a window that's not the current one
+    local current_win = vim.api.nvim_get_current_win()
+    for _, win in ipairs(analysis.editor_windows) do
+      if win ~= current_win then
+        return win, false
+      end
+    end
+    -- If all windows are current, just use the first one
+    return analysis.editor_windows[1], false
+  end
+
+  -- Only one editor window exists, need to create a split
+  if #analysis.editor_windows == 1 then
+    return analysis.editor_windows[1], true
+  end
+
+  -- No suitable windows found
+  return nil, true
+end
 
 ---Finds a suitable main editor window to open files in.
 ---Excludes terminals, sidebars, and floating windows.
@@ -54,43 +184,7 @@ local function find_main_editor_window()
   local windows = vim.api.nvim_list_wins()
 
   for _, win in ipairs(windows) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    local buftype = vim.api.nvim_buf_get_option(buf, "buftype")
-    local filetype = vim.api.nvim_buf_get_option(buf, "filetype")
-    local win_config = vim.api.nvim_win_get_config(win)
-
-    -- Check if this is a suitable window
-    local is_suitable = true
-
-    -- Skip floating windows
-    if win_config.relative and win_config.relative ~= "" then
-      is_suitable = false
-    end
-
-    -- Skip special buffer types
-    if is_suitable and (buftype == "terminal" or buftype == "nofile" or buftype == "prompt") then
-      is_suitable = false
-    end
-
-    -- Skip known sidebar filetypes
-    if
-      is_suitable
-      and (
-        filetype == "neo-tree"
-        or filetype == "neo-tree-popup"
-        or filetype == "NvimTree"
-        or filetype == "oil"
-        or filetype == "minifiles"
-        or filetype == "netrw"
-        or filetype == "aerial"
-        or filetype == "tagbar"
-      )
-    then
-      is_suitable = false
-    end
-
-    -- This looks like a main editor window
-    if is_suitable then
+    if is_editor_window(win) then
       return win
     end
   end
@@ -118,30 +212,59 @@ local function handler(params)
   local preview = params.preview or false
   local make_frontmost = params.makeFrontmost ~= false -- default true
   local select_to_end_of_line = params.selectToEndOfLine or false
+  local split = params.split or "vertical" -- default to vertical split
 
-  local message = "Opened file: " .. file_path
+  -- Find the best window to use (smart reuse of existing windows)
+  local target_win, should_split = find_best_window_for_file(file_path, split)
 
-  -- Find the main editor window
-  local target_win = find_main_editor_window()
+  -- Build message based on what we're doing
+  local message
+  if not should_split and split ~= "none" then
+    message = "Opened file: " .. file_path .. " (reused existing window)"
+  elseif split == "vertical" then
+    message = "Opened file: " .. file_path .. " in vertical split"
+  elseif split == "horizontal" then
+    message = "Opened file: " .. file_path .. " in horizontal split"
+  else
+    message = "Opened file: " .. file_path
+  end
+
+  ---Opens a file, optionally creating a split first
+  ---@param do_split boolean whether to create a split
+  ---@param split_type string "vertical" or "horizontal" (only used if do_split is true)
+  ---@param is_preview boolean whether to open in preview mode
+  ---@param path string the file path to open
+  local function open_file_smart(do_split, split_type, is_preview, path)
+    local escaped_path = vim.fn.fnameescape(path)
+    if is_preview then
+      vim.cmd("pedit " .. escaped_path)
+    elseif do_split and split_type == "vertical" then
+      vim.cmd("vsplit " .. escaped_path)
+    elseif do_split and split_type == "horizontal" then
+      vim.cmd("split " .. escaped_path)
+    else
+      vim.cmd("edit " .. escaped_path)
+    end
+  end
 
   if target_win then
     -- Open file in the target window
     vim.api.nvim_win_call(target_win, function()
-      if preview then
-        vim.cmd("pedit " .. vim.fn.fnameescape(file_path))
-      else
-        vim.cmd("edit " .. vim.fn.fnameescape(file_path))
-      end
+      open_file_smart(should_split, split, preview, file_path)
     end)
     -- Focus the window after opening if makeFrontmost is true
     if make_frontmost then
-      vim.api.nvim_set_current_win(target_win)
+      if should_split and not preview then
+        -- The split command moved focus to the new window
+        vim.api.nvim_set_current_win(vim.api.nvim_get_current_win())
+      else
+        vim.api.nvim_set_current_win(target_win)
+      end
     end
   else
-    -- Fallback: Create a new window if no suitable window found
-    -- Try to move to a better position
+    -- Fallback: No suitable window found, try to create one
     vim.cmd("wincmd t") -- Go to top-left
-    vim.cmd("wincmd l") -- Move right (to middle if layout is left|middle|right)
+    vim.cmd("wincmd l") -- Move right
 
     -- If we're still in a special window, create a new split
     local buf = vim.api.nvim_win_get_buf(vim.api.nvim_get_current_win())
@@ -151,11 +274,7 @@ local function handler(params)
       vim.cmd("vsplit")
     end
 
-    if preview then
-      vim.cmd("pedit " .. vim.fn.fnameescape(file_path))
-    else
-      vim.cmd("edit " .. vim.fn.fnameescape(file_path))
-    end
+    open_file_smart(should_split, split, preview, file_path)
   end
 
   -- Handle text selection by line numbers

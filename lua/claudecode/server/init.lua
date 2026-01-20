@@ -3,6 +3,7 @@ local claudecode_main = require("claudecode") -- Added for version access
 local logger = require("claudecode.logger")
 local tcp_server = require("claudecode.server.tcp")
 local tools = require("claudecode.tools.init") -- Added: Require the tools module
+local instructions = require("claudecode.instructions")
 
 local MCP_PROTOCOL_VERSION = "2024-11-05"
 
@@ -279,6 +280,7 @@ function M.register_handlers()
           name = "claudecode-neovim",
           version = claudecode_main.version:string(),
         },
+        instructions = instructions.get_instructions(claudecode_main.state.config),
       }
     end,
 
