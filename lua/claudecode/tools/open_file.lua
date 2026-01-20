@@ -156,7 +156,8 @@ local function analyze_editor_windows()
 end
 
 ---Finds the best window to open a file in, considering existing windows.
----Prefers empty windows, then reuses existing windows if there are multiple.
+---When split is requested (vertical/horizontal), always creates a new split.
+---Only reuses empty/dashboard windows.
 ---@param file_path string The file path to open (to check if already open)
 ---@param want_split string "none", "vertical", or "horizontal"
 ---@return integer? target_win Window to open file in
@@ -174,31 +175,22 @@ local function find_best_window_for_file(file_path, want_split)
     end
   end
 
-  -- If split is "none", just find any editor window
+  -- If split is "none", just find any editor window (prefer empty ones)
   if want_split == "none" then
+    if #analysis.empty_windows > 0 then
+      return analysis.empty_windows[1], false
+    end
     if #analysis.editor_windows > 0 then
       return analysis.editor_windows[1], false
     end
     return nil, false
   end
 
-  -- For split requests: try to reuse empty windows first
+  -- For split requests (vertical/horizontal):
+  -- Only reuse empty/dashboard windows, otherwise create new split
   if #analysis.empty_windows > 0 then
     -- Use empty window instead of creating split
     return analysis.empty_windows[1], false
-  end
-
-  -- If there are multiple editor windows, reuse one instead of creating more
-  if #analysis.editor_windows >= 2 then
-    -- Find a window that's not the current one
-    local current_win = vim.api.nvim_get_current_win()
-    for _, win in ipairs(analysis.editor_windows) do
-      if win ~= current_win then
-        return win, false
-      end
-    end
-    -- If all windows are current, just use the first one
-    return analysis.editor_windows[1], false
   end
 
   -- Only one editor window exists, need to create a split
