@@ -43,8 +43,8 @@ local schema = {
       split = {
         type = "string",
         enum = { "none", "vertical", "horizontal" },
-        description = "How to split the window when opening the file. 'vertical' creates a vertical split (side by side), 'horizontal' creates a horizontal split (stacked). Default is 'none' - opens in existing window without creating new splits.",
-        default = "none",
+        description = "How to split the window when opening the file. 'vertical' creates a vertical split (side by side), 'horizontal' creates a horizontal split (stacked). Default is 'horizontal'.",
+        default = "horizontal",
       },
     },
     required = { "filePath" },
@@ -245,7 +245,7 @@ local function handler(params)
   local preview = params.preview or false
   local make_frontmost = params.makeFrontmost ~= false -- default true
   local select_to_end_of_line = params.selectToEndOfLine or false
-  local split = params.split or "none" -- default to opening in existing window
+  local split = params.split or "horizontal" -- default to horizontal split
 
   -- Find the best window to use (smart reuse of existing windows)
   local target_win, should_split = find_best_window_for_file(file_path, split)

@@ -145,7 +145,7 @@ def main():
     open_parser.add_argument('--line', '-l', type=int, help='Line number to jump to')
     open_parser.add_argument('--end-line', type=int, help='End line for selection')
     open_parser.add_argument('--split', '-s', choices=['vertical', 'horizontal', 'none'],
-                            default='none', help='Split type (default: none - use existing window)')
+                            default='horizontal', help='Split type (default: horizontal)')
     open_parser.add_argument('--window', '-w', type=int, help='Window number (1-based) to open file in')
 
     # exec command
