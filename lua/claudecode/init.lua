@@ -441,7 +441,11 @@ function M.start(show_startup_notification)
   M.state.port = tonumber(result)
   M.state.auth_token = auth_token
 
-  local lock_success, lock_result, returned_auth_token = lockfile.create(M.state.port, auth_token)
+  -- Get HTTP port from server status if available
+  local server_status = server.get_status()
+  local http_port = server_status and server_status.http_port or nil
+
+  local lock_success, lock_result, returned_auth_token = lockfile.create(M.state.port, auth_token, http_port)
 
   if not lock_success then
     server.stop()
@@ -539,7 +543,13 @@ function M._create_commands()
 
   vim.api.nvim_create_user_command("ClaudeCodeStatus", function()
     if M.state.server and M.state.port then
-      logger.info("command", "Claude Code integration is running on port " .. tostring(M.state.port))
+      local server_module = require("claudecode.server.init")
+      local status = server_module.get_status()
+      local msg = "Claude Code integration is running on port " .. tostring(M.state.port)
+      if status.http_port then
+        msg = msg .. " (HTTP: " .. tostring(status.http_port) .. ")"
+      end
+      logger.info("command", msg)
     else
       logger.info("command", "Claude Code integration is not running")
     end

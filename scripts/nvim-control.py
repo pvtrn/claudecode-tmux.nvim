@@ -7,6 +7,7 @@ Usage:
     nvim-control.py exec <command>
     nvim-control.py lua <code>
     nvim-control.py list-tools
+    nvim-control.py mcp-server   # Run as STDIO MCP server (for Codex integration)
 
 Examples:
     nvim-control.py open /path/to/file.lua --line 42
@@ -14,6 +15,11 @@ Examples:
     nvim-control.py exec "vsplit"
     nvim-control.py exec "wincmd h"
     nvim-control.py lua "return vim.fn.expand('%:p')"
+
+    # For OpenAI Codex integration, add to ~/.codex/config.toml:
+    # [mcp_servers.neovim]
+    # command = "nvim-control"
+    # args = ["mcp-server"]
 """
 
 import asyncio
@@ -135,6 +141,62 @@ async def list_tools(port, auth_token):
         return json.loads(response)
 
 
+async def run_mcp_stdio_server():
+    """Run as STDIO MCP server - proxies requests to the WebSocket server"""
+    port, auth_token = get_lock_file()
+    if not port or not auth_token:
+        # Send error response
+        error_response = {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {
+                "code": -32603,
+                "message": "No Neovim instance found. Make sure claudecode.nvim is running (:ClaudeCodeStart)"
+            }
+        }
+        print(json.dumps(error_response), flush=True)
+        return
+
+    uri = f"ws://127.0.0.1:{port}"
+    headers = {"x-claude-code-ide-authorization": auth_token}
+
+    try:
+        async with websockets.connect(uri, additional_headers=headers) as ws:
+            # Read from stdin and write to stdout
+            async def stdin_to_ws():
+                loop = asyncio.get_event_loop()
+                while True:
+                    try:
+                        line = await loop.run_in_executor(None, sys.stdin.readline)
+                        if not line:
+                            break
+                        line = line.strip()
+                        if line:
+                            await ws.send(line)
+                    except Exception as e:
+                        break
+
+            async def ws_to_stdout():
+                try:
+                    async for message in ws:
+                        print(message, flush=True)
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+
+            # Run both tasks concurrently
+            await asyncio.gather(stdin_to_ws(), ws_to_stdout())
+    except Exception as e:
+        error_response = {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {
+                "code": -32603,
+                "message": f"Failed to connect to Neovim: {str(e)}"
+            }
+        }
+        print(json.dumps(error_response), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Control Neovim via claudecode.nvim WebSocket')
     subparsers = parser.add_subparsers(dest='command', help='Commands')
@@ -144,8 +206,8 @@ def main():
     open_parser.add_argument('file', help='Path to file')
     open_parser.add_argument('--line', '-l', type=int, help='Line number to jump to')
     open_parser.add_argument('--end-line', type=int, help='End line for selection')
-    open_parser.add_argument('--split', '-s', choices=['vertical', 'horizontal', 'none'],
-                            default='horizontal', help='Split type (default: horizontal)')
+    open_parser.add_argument('--split', '-s', choices=['vertical', 'horizontal', 'none', 'auto'],
+                            default='auto', help='Split type (default: auto - smart placement)')
     open_parser.add_argument('--window', '-w', type=int, help='Window number (1-based) to open file in')
 
     # exec command
@@ -175,13 +237,21 @@ def main():
     close_win_parser = subparsers.add_parser('close-window', help='Close window by number')
     close_win_parser.add_argument('window_num', type=int, help='Window number (1-based)')
 
+    # mcp-server command - STDIO MCP server for Codex integration
+    subparsers.add_parser('mcp-server', help='Run as STDIO MCP server (for Codex integration)')
+
     args = parser.parse_args()
 
     if not args.command:
         parser.print_help()
         sys.exit(1)
 
-    # Get connection info
+    # Handle mcp-server command separately (handles its own connection)
+    if args.command == 'mcp-server':
+        asyncio.run(run_mcp_stdio_server())
+        return
+
+    # Get connection info for other commands
     port, auth_token = get_lock_file()
     if not port or not auth_token:
         print("Error: No Neovim instance found. Make sure claudecode.nvim is running (:ClaudeCodeStart)")

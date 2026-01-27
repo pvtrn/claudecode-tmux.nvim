@@ -13,21 +13,31 @@ You are connected to Neovim via MCP. You can control the editor using these tool
 ## File Operations
 
 ### openFile
-Opens files in existing windows by default (no new splits).
+Smart file opening with intelligent window placement.
 
 Parameters:
 - filePath (required): Path to the file
 - startLine: Line number to jump to
 - endLine: End line for selection
-- split: "none" (default), "vertical", or "horizontal"
+- split: "auto" (default - smart), "none", "vertical", or "horizontal"
 - preview: Open in preview mode
 - makeFrontmost: Focus window after opening (default: true)
 
+**Smart Placement Rules (split="auto"):**
+1. If file is already open → focus that window
+2. If empty/dashboard window exists → reuse it
+3. Same directory preference → open near related files
+4. Same file type preference → .lua near .lua, .py near .py
+5. Test files → open near other tests
+6. Auto split direction → vertical for wide screens, horizontal for tall
+7. Won't replace modified buffers unless necessary
+8. Won't create splits in too-small windows
+
 Examples:
-- Open file in current window: {"filePath": "/path/file.lua"}
+- Smart open (recommended): {"filePath": "/path/file.lua"}
 - Jump to line 42: {"filePath": "/path/file.lua", "startLine": 42}
-- Create vertical split: {"filePath": "/path/file.lua", "split": "vertical"}
-- Create horizontal split: {"filePath": "/path/file.lua", "split": "horizontal"}
+- Force vertical split: {"filePath": "/path/file.lua", "split": "vertical"}
+- Replace current window: {"filePath": "/path/file.lua", "split": "none"}
 
 ### executeCommand
 Execute arbitrary Neovim commands or Lua code.
@@ -59,26 +69,32 @@ Tab commands:
 - getWorkspaceFolders: Get workspace info
 
 ## Tips
-- Default: opens file in existing window (no new splits)
-- Use split: "vertical" or "horizontal" only when you need side-by-side view
-- Smart window reuse: openFile automatically reuses existing windows
-- Combine executeCommand for navigation with openFile for opening
+- Default: split="auto" uses smart placement heuristics
+- Files from same directory open near each other
+- Test files open near other tests
+- Empty/dashboard windows are reused automatically
+- Modified buffers are protected from replacement
+- Use split="none" to force replace current window
+- Use split="vertical"/"horizontal" to force specific split direction
 
 ## CLI Alternative (nvim-control)
 If MCP tools are not available directly, use the nvim-control CLI via Bash:
 
 ```bash
-# Open file in current window (default)
+# Smart open (auto placement - recommended)
 nvim-control open /path/to/file.lua
 
 # Open file at specific line
 nvim-control open /path/to/file.lua --line 42
 
-# Create vertical split (side by side)
+# Force vertical split (side by side)
 nvim-control open /path/to/file.lua --split vertical
 
-# Create horizontal split (stacked)
+# Force horizontal split (stacked)
 nvim-control open /path/to/file.lua --split horizontal
+
+# Replace current window (no split)
+nvim-control open /path/to/file.lua --split none
 
 # Open file in specific window (1-based number)
 nvim-control open /path/to/file.lua --window 2
@@ -110,6 +126,22 @@ nvim-control list-tools
 - Use `--window N` to open file in specific window (1 = first, 2 = second, etc.)
 - Use `nvim-control focus N` to switch to window N
 - Use `nvim-control close-window N` to close window N
+
+## OpenAI Codex Integration
+For OpenAI Codex integration, add to ~/.codex/config.toml:
+
+```toml
+# Option 1: STDIO transport (simpler)
+[mcp_servers.neovim]
+command = "nvim-control"
+args = ["mcp-server"]
+
+# Option 2: HTTP transport (if Neovim provides HTTP endpoint)
+# Check lock file for httpUrl: cat ~/.claude/ide/*.lock | grep httpUrl
+[mcp_servers.neovim_http]
+url = "http://127.0.0.1:PORT/mcp"
+bearer_token_env_var = "NVIM_AUTH_TOKEN"
+```
 ]]
 
 --- Get the instructions to send to the agent.

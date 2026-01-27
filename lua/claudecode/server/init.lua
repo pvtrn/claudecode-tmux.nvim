@@ -2,16 +2,20 @@
 local claudecode_main = require("claudecode") -- Added for version access
 local logger = require("claudecode.logger")
 local tcp_server = require("claudecode.server.tcp")
+local http_server = require("claudecode.server.http")
 local tools = require("claudecode.tools.init") -- Added: Require the tools module
 local instructions = require("claudecode.instructions")
 
 local MCP_PROTOCOL_VERSION = "2024-11-05"
+local MCP_HTTP_PROTOCOL_VERSION = "2025-03-26"
 
 local M = {}
 
 ---@class ServerState
 ---@field server table|nil The TCP server instance
 ---@field port number|nil The port server is running on
+---@field http_server table|nil The HTTP server instance
+---@field http_port number|nil The HTTP port server is running on
 ---@field auth_token string|nil The authentication token for validating connections
 ---@field clients table<string, WebSocketClient> A list of connected clients
 ---@field handlers table Message handlers by method name
@@ -19,6 +23,8 @@ local M = {}
 M.state = {
   server = nil,
   port = nil,
+  http_server = nil,
+  http_port = nil,
   auth_token = nil,
   clients = {},
   handlers = {},
@@ -98,6 +104,17 @@ function M.start(config, auth_token)
 
   M.state.ping_timer = tcp_server.start_ping_timer(server, 30000) -- Start ping timer to keep connections alive
 
+  -- Start HTTP server for Streamable HTTP transport (Codex compatibility)
+  local http_srv, http_err = http_server.create_server(config, M._handle_http_message, auth_token)
+  if http_srv then
+    M.state.http_server = http_srv
+    M.state.http_port = http_srv.port
+    logger.info("server", "HTTP transport enabled on port " .. http_srv.port)
+  else
+    -- HTTP server is optional, just log the error
+    logger.debug("server", "HTTP transport not started: " .. (http_err or "unknown error"))
+  end
+
   return true, server.port
 end
 
@@ -117,6 +134,13 @@ function M.stop()
 
   tcp_server.stop_server(M.state.server)
 
+  -- Stop HTTP server if running
+  if M.state.http_server then
+    http_server.stop_server(M.state.http_server)
+    M.state.http_server = nil
+    M.state.http_port = nil
+  end
+
   -- CRITICAL: Clear global deferred responses to prevent memory leaks and hanging
   if _G.claude_deferred_responses then
     _G.claude_deferred_responses = {}
@@ -128,6 +152,43 @@ function M.stop()
   M.state.clients = {}
 
   return true
+end
+
+---Handle incoming HTTP message (for Streamable HTTP transport)
+---@param client table Virtual HTTP client
+---@param message table Parsed JSON-RPC message
+---@return table|nil result The result to send back
+function M._handle_http_message(client, message)
+  local method = message.method
+  local params = message.params or {}
+
+  local handler = M.state.handlers[method]
+  if not handler then
+    return {
+      error = {
+        code = -32601,
+        message = "Method not found",
+        data = "Unknown method: " .. tostring(method),
+      },
+    }
+  end
+
+  local success, result, error_data = pcall(handler, client, params)
+  if success then
+    if error_data then
+      return { error = error_data }
+    else
+      return result
+    end
+  else
+    return {
+      error = {
+        code = -32603,
+        message = "Internal error",
+        data = tostring(result),
+      },
+    }
+  end
 end
 
 ---Handle incoming WebSocket message
@@ -411,16 +472,26 @@ function M.get_status()
     return {
       running = false,
       port = nil,
+      http_port = nil,
       client_count = 0,
     }
   end
 
-  return {
+  local status = {
     running = true,
     port = M.state.port,
     client_count = tcp_server.get_client_count(M.state.server),
     clients = tcp_server.get_clients_info(M.state.server),
   }
+
+  -- Add HTTP server info if running
+  if M.state.http_server then
+    status.http_port = M.state.http_port
+    local http_status = http_server.get_status(M.state.http_server)
+    status.http_session_count = http_status.session_count
+  end
+
+  return status
 end
 
 return M

@@ -69,10 +69,11 @@ end
 ---Create the lock file for a specified WebSocket port
 ---@param port number The port number for the WebSocket server
 ---@param auth_token? string Optional pre-generated auth token (generates new one if not provided)
+---@param http_port? number Optional HTTP port for Streamable HTTP transport
 ---@return boolean success Whether the operation was successful
 ---@return string result_or_error The lock file path if successful, or error message if failed
 ---@return string? auth_token The authentication token if successful
-function M.create(port, auth_token)
+function M.create(port, auth_token, http_port)
   if not port or type(port) ~= "number" then
     return false, "Invalid port number"
   end
@@ -119,6 +120,12 @@ function M.create(port, auth_token)
     transport = "ws",
     authToken = auth_token,
   }
+
+  -- Add HTTP transport info if available
+  if http_port and type(http_port) == "number" and http_port > 0 and http_port <= 65535 then
+    lock_content.httpPort = http_port
+    lock_content.httpUrl = "http://127.0.0.1:" .. http_port .. "/mcp"
+  end
 
   local json
   local ok_json, json_err = pcall(function()

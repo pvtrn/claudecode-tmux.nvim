@@ -1,4 +1,4 @@
---- Tool implementation for opening a file.
+--- Tool implementation for opening a file with smart window placement.
 
 local schema = {
   description = "Open a file in the editor and optionally select a range of text",
@@ -42,9 +42,9 @@ local schema = {
       },
       split = {
         type = "string",
-        enum = { "none", "vertical", "horizontal" },
-        description = "How to split the window when opening the file. 'vertical' creates a vertical split (side by side), 'horizontal' creates a horizontal split (stacked). Default is 'horizontal'.",
-        default = "horizontal",
+        enum = { "none", "vertical", "horizontal", "auto" },
+        description = "How to split the window when opening the file. 'auto' intelligently chooses based on screen dimensions and context. Default is 'auto'.",
+        default = "auto",
       },
     },
     required = { "filePath" },
@@ -52,6 +52,39 @@ local schema = {
     ["$schema"] = "http://json-schema.org/draft-07/schema#",
   },
 }
+
+-- Minimum window dimensions for comfortable editing
+local MIN_WINDOW_WIDTH = 40
+local MIN_WINDOW_HEIGHT = 8
+
+-- Special buffer types that should be skipped
+local DASHBOARD_FILETYPES = {
+  "alpha", "dashboard", "starter", "snacks_dashboard",
+  "ministarter", "lazy", "lazyterm"
+}
+
+local SIDEBAR_FILETYPES = {
+  "neo-tree", "neo-tree-popup", "NvimTree", "oil",
+  "minifiles", "netrw", "aerial", "tagbar", "Outline"
+}
+
+local TEMPORARY_FILETYPES = {
+  "help", "qf", "quickfix", "loclist", "man", "fugitive",
+  "gitcommit", "DiffviewFiles", "DiffviewFileHistory"
+}
+
+---Check if filetype is in a list
+---@param ft string Filetype to check
+---@param list table List of filetypes
+---@return boolean
+local function is_filetype_in_list(ft, list)
+  for _, v in ipairs(list) do
+    if ft == v then
+      return true
+    end
+  end
+  return false
+end
 
 ---Checks if a window is a suitable editor window (not terminal, sidebar, floating, etc.)
 ---@param win integer Window ID to check
@@ -68,153 +101,325 @@ local function is_editor_window(win)
   end
 
   -- Dashboard windows are suitable (can be replaced with files)
-  local dashboard_filetypes = {
-    "alpha", "dashboard", "starter", "snacks_dashboard",
-    "ministarter", "lazy", "lazyterm"
-  }
-  for _, ft in ipairs(dashboard_filetypes) do
-    if filetype == ft then
-      return true
-    end
+  if is_filetype_in_list(filetype, DASHBOARD_FILETYPES) then
+    return true
   end
 
-  -- Skip special buffer types (but not dashboards which we handled above)
-  if buftype == "terminal" or buftype == "nofile" or buftype == "prompt" then
+  -- Skip special buffer types
+  if buftype == "terminal" or buftype == "nofile" or buftype == "prompt" or buftype == "help" then
     return false
   end
 
   -- Skip known sidebar filetypes
-  local sidebar_filetypes = {
-    "neo-tree", "neo-tree-popup", "NvimTree", "oil",
-    "minifiles", "netrw", "aerial", "tagbar"
-  }
-  for _, ft in ipairs(sidebar_filetypes) do
-    if filetype == ft then
-      return false
-    end
+  if is_filetype_in_list(filetype, SIDEBAR_FILETYPES) then
+    return false
   end
 
   return true
 end
 
----Checks if a buffer is a dashboard/starter screen
----@param buf integer Buffer ID to check
----@return boolean is_dashboard True if buffer is a dashboard
-local function is_dashboard_buffer(buf)
+---Check if a window is a terminal
+---@param win integer Window ID
+---@return boolean
+local function is_terminal_window(win)
+  local buf = vim.api.nvim_win_get_buf(win)
+  local buftype = vim.api.nvim_buf_get_option(buf, "buftype")
+  return buftype == "terminal"
+end
+
+---Check if a buffer is empty, dashboard, or temporary
+---@param buf integer Buffer ID
+---@return boolean is_replaceable True if buffer can be replaced
+---@return string reason Why it's replaceable
+local function is_buffer_replaceable(buf)
   local filetype = vim.api.nvim_buf_get_option(buf, "filetype")
-  local dashboard_filetypes = {
-    "alpha", "dashboard", "starter", "snacks_dashboard",
-    "ministarter", "lazy", "lazyterm"
-  }
-  for _, ft in ipairs(dashboard_filetypes) do
-    if filetype == ft then
-      return true
-    end
-  end
-  return false
-end
 
----Checks if a buffer is empty (no name and no content) or a dashboard
----@param buf integer Buffer ID to check
----@return boolean is_empty True if buffer is empty or dashboard
-local function is_buffer_empty(buf)
-  -- Dashboard counts as empty - can be replaced with a file
-  if is_dashboard_buffer(buf) then
-    return true
+  -- Dashboard is replaceable
+  if is_filetype_in_list(filetype, DASHBOARD_FILETYPES) then
+    return true, "dashboard"
   end
 
+  -- Temporary buffers are replaceable
+  if is_filetype_in_list(filetype, TEMPORARY_FILETYPES) then
+    return true, "temporary"
+  end
+
+  -- Empty buffer is replaceable
   local name = vim.api.nvim_buf_get_name(buf)
-  if name ~= "" then
-    return false
-  end
-  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-  return #lines == 1 and lines[1] == ""
-end
-
----Finds all suitable editor windows and categorizes them.
----@return table result Table with editor_windows, empty_windows, and total count
-local function analyze_editor_windows()
-  local windows = vim.api.nvim_list_wins()
-  local editor_windows = {}
-  local empty_windows = {}
-
-  for _, win in ipairs(windows) do
-    if is_editor_window(win) then
-      table.insert(editor_windows, win)
-      local buf = vim.api.nvim_win_get_buf(win)
-      if is_buffer_empty(buf) then
-        table.insert(empty_windows, win)
-      end
+  if name == "" then
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    if #lines == 1 and lines[1] == "" then
+      return true, "empty"
     end
   end
+
+  return false, ""
+end
+
+---Get directory from file path
+---@param path string File path
+---@return string directory
+local function get_directory(path)
+  return vim.fn.fnamemodify(path, ":h")
+end
+
+---Get file extension
+---@param path string File path
+---@return string extension
+local function get_extension(path)
+  return vim.fn.fnamemodify(path, ":e")
+end
+
+---Check if path is a test file
+---@param path string File path
+---@return boolean
+local function is_test_file(path)
+  local name = vim.fn.fnamemodify(path, ":t")
+  return name:match("_test%.") ~= nil
+    or name:match("%.test%.") ~= nil
+    or name:match("_spec%.") ~= nil
+    or name:match("%.spec%.") ~= nil
+    or name:match("^test_") ~= nil
+    or path:match("/tests?/") ~= nil
+    or path:match("/spec/") ~= nil
+    or path:match("/__tests__/") ~= nil
+end
+
+---Get detailed window information for smart placement
+---@param win integer Window ID
+---@return table info Window information
+local function get_window_info(win)
+  local buf = vim.api.nvim_win_get_buf(win)
+  local buf_name = vim.api.nvim_buf_get_name(buf)
+  local width = vim.api.nvim_win_get_width(win)
+  local height = vim.api.nvim_win_get_height(win)
+  local modified = vim.api.nvim_buf_get_option(buf, "modified")
+  local filetype = vim.api.nvim_buf_get_option(buf, "filetype")
+  local is_replaceable, replace_reason = is_buffer_replaceable(buf)
 
   return {
-    editor_windows = editor_windows,
-    empty_windows = empty_windows,
-    count = #editor_windows,
+    win = win,
+    buf = buf,
+    path = buf_name,
+    directory = buf_name ~= "" and get_directory(buf_name) or "",
+    extension = buf_name ~= "" and get_extension(buf_name) or "",
+    is_test = buf_name ~= "" and is_test_file(buf_name) or false,
+    width = width,
+    height = height,
+    modified = modified,
+    filetype = filetype,
+    is_replaceable = is_replaceable,
+    replace_reason = replace_reason,
+    is_current = win == vim.api.nvim_get_current_win(),
+    is_large_enough = width >= MIN_WINDOW_WIDTH and height >= MIN_WINDOW_HEIGHT,
   }
 end
 
----Finds the best window to open a file in, considering existing windows.
----When split is requested (vertical/horizontal), always creates a new split.
----Only reuses empty/dashboard windows.
----@param file_path string The file path to open (to check if already open)
----@param want_split string "none", "vertical", or "horizontal"
----@return integer? target_win Window to open file in
----@return boolean should_split Whether to create a new split
-local function find_best_window_for_file(file_path, want_split)
-  local analysis = analyze_editor_windows()
+---Calculate a score for how suitable a window is for opening a file
+---Higher score = better candidate
+---@param win_info table Window information
+---@param file_path string Path of file to open
+---@param file_dir string Directory of file to open
+---@param file_ext string Extension of file to open
+---@param file_is_test boolean Whether file to open is a test
+---@return number score Suitability score
+local function calculate_window_score(win_info, file_path, file_dir, file_ext, file_is_test)
+  local score = 0
 
-  -- Check if file is already open in a window
-  for _, win in ipairs(analysis.editor_windows) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    local buf_name = vim.api.nvim_buf_get_name(buf)
-    if buf_name == file_path then
-      -- File already open, just focus it
-      return win, false
+  -- Strong preference for replaceable windows (empty, dashboard, temporary)
+  if win_info.is_replaceable then
+    score = score + 1000
+    if win_info.replace_reason == "empty" then
+      score = score + 100
+    elseif win_info.replace_reason == "dashboard" then
+      score = score + 90
+    elseif win_info.replace_reason == "temporary" then
+      score = score + 50
     end
   end
 
-  -- If split is "none", just find any editor window (prefer empty ones)
-  if want_split == "none" then
-    if #analysis.empty_windows > 0 then
-      return analysis.empty_windows[1], false
-    end
-    if #analysis.editor_windows > 0 then
-      return analysis.editor_windows[1], false
-    end
-    return nil, false
+  -- Penalty for modified buffers (don't want to replace unsaved work)
+  if win_info.modified then
+    score = score - 500
   end
 
-  -- For split requests (vertical/horizontal):
-  -- Only reuse empty/dashboard windows, otherwise create new split
-  if #analysis.empty_windows > 0 then
-    -- Use empty window instead of creating split
-    return analysis.empty_windows[1], false
+  -- Bonus for same directory (contextual relevance)
+  if win_info.directory ~= "" and win_info.directory == file_dir then
+    score = score + 200
   end
 
-  -- Only one editor window exists, need to create a split
-  if #analysis.editor_windows == 1 then
-    return analysis.editor_windows[1], true
+  -- Bonus for same file type
+  if win_info.extension ~= "" and win_info.extension == file_ext then
+    score = score + 100
   end
 
-  -- No suitable windows found
-  return nil, true
+  -- Bonus for test files near test files
+  if file_is_test and win_info.is_test then
+    score = score + 150
+  end
+
+  -- Bonus for non-test files near non-test files
+  if not file_is_test and not win_info.is_test and win_info.path ~= "" then
+    score = score + 50
+  end
+
+  -- Penalty for windows that are too small
+  if not win_info.is_large_enough then
+    score = score - 300
+  end
+
+  -- Small bonus for larger windows (more comfortable editing)
+  score = score + math.min(win_info.width / 10, 20)
+  score = score + math.min(win_info.height / 2, 10)
+
+  -- Slight penalty for current window (prefer not to replace what user is looking at)
+  -- Unless it's replaceable
+  if win_info.is_current and not win_info.is_replaceable then
+    score = score - 50
+  end
+
+  return score
 end
 
----Finds a suitable main editor window to open files in.
----Excludes terminals, sidebars, and floating windows.
----@return integer? win_id Window ID of the main editor window, or nil if not found
-local function find_main_editor_window()
-  local windows = vim.api.nvim_list_wins()
+---Determine the best split direction based on available space
+---@return string "vertical" or "horizontal"
+local function determine_smart_split_direction()
+  local total_width = vim.o.columns
+  local total_height = vim.o.lines
 
+  -- Account for status line, command line, etc.
+  local usable_height = total_height - 3
+
+  -- If screen is wide (aspect ratio > 2:1), prefer vertical split
+  -- If screen is tall, prefer horizontal split
+  local aspect_ratio = total_width / usable_height
+
+  if aspect_ratio >= 2.0 then
+    return "vertical"
+  elseif aspect_ratio <= 1.2 then
+    return "horizontal"
+  else
+    -- For medium aspect ratios, check if we have enough width for comfortable side-by-side
+    if total_width >= 160 then
+      return "vertical"
+    elseif usable_height >= 40 then
+      return "horizontal"
+    else
+      return "vertical" -- Default to vertical for small screens
+    end
+  end
+end
+
+---Find the best window for opening a file using smart heuristics
+---@param file_path string The file path to open
+---@param requested_split string "none", "vertical", "horizontal", or "auto"
+---@return integer? target_win Window to open file in (nil if should create new)
+---@return boolean should_split Whether to create a new split
+---@return string split_direction "vertical" or "horizontal" (only used if should_split)
+---@return string message Description of the decision made
+local function find_smart_window(file_path, requested_split)
+  local windows = vim.api.nvim_list_wins()
+  local editor_windows = {}
+  local terminal_present = false
+
+  -- Gather information about all windows
   for _, win in ipairs(windows) do
     if is_editor_window(win) then
-      return win
+      local info = get_window_info(win)
+      table.insert(editor_windows, info)
+    elseif is_terminal_window(win) then
+      terminal_present = true
     end
   end
 
-  return nil
+  -- File metadata for scoring
+  local file_dir = get_directory(file_path)
+  local file_ext = get_extension(file_path)
+  local file_is_test = is_test_file(file_path)
+
+  -- Priority 1: Check if file is already open
+  for _, info in ipairs(editor_windows) do
+    if info.path == file_path then
+      return info.win, false, "none", "File already open, focusing existing window"
+    end
+  end
+
+  -- Priority 2: Find best existing window using scoring
+  local best_window = nil
+  local best_score = -math.huge
+
+  for _, info in ipairs(editor_windows) do
+    local score = calculate_window_score(info, file_path, file_dir, file_ext, file_is_test)
+    if score > best_score then
+      best_score = score
+      best_window = info
+    end
+  end
+
+  -- Determine if we should reuse the window or create a split
+  local smart_split_dir = determine_smart_split_direction()
+
+  -- Resolve "auto" split direction
+  local effective_split = requested_split
+  if requested_split == "auto" then
+    effective_split = smart_split_dir
+  end
+
+  -- Decision logic
+  if best_window then
+    -- If the best window is replaceable (empty/dashboard/temporary), use it
+    if best_window.is_replaceable then
+      return best_window.win, false, "none", "Reusing " .. best_window.replace_reason .. " window"
+    end
+
+    -- If split is "none", use the best window even if not replaceable
+    if requested_split == "none" then
+      if best_window.modified then
+        return best_window.win, false, "none", "Opening in modified buffer (split=none requested)"
+      else
+        return best_window.win, false, "none", "Opening in existing window"
+      end
+    end
+
+    -- For auto/explicit split: check if we should split or reuse
+    if #editor_windows == 1 then
+      -- Only one editor window, create a split
+      return best_window.win, true, effective_split, "Creating " .. effective_split .. " split (single window layout)"
+    end
+
+    -- Multiple windows exist
+    if best_score >= 200 then
+      -- Good candidate found (same directory, same type, etc.)
+      if not best_window.modified then
+        return best_window.win, false, "none", "Reusing contextually relevant window"
+      end
+    end
+
+    -- Check if current layout has room for another split
+    local current_win = vim.api.nvim_get_current_win()
+    local current_width = vim.api.nvim_win_get_width(current_win)
+    local current_height = vim.api.nvim_win_get_height(current_win)
+
+    if effective_split == "vertical" and current_width < MIN_WINDOW_WIDTH * 2 then
+      -- Not enough room for vertical split, try to reuse
+      if best_window and not best_window.modified then
+        return best_window.win, false, "none", "Reusing window (not enough room for vertical split)"
+      end
+    end
+
+    if effective_split == "horizontal" and current_height < MIN_WINDOW_HEIGHT * 2 then
+      -- Not enough room for horizontal split, try to reuse
+      if best_window and not best_window.modified then
+        return best_window.win, false, "none", "Reusing window (not enough room for horizontal split)"
+      end
+    end
+
+    -- Default: create a split from the best window
+    return best_window.win, true, effective_split, "Creating " .. effective_split .. " split"
+  end
+
+  -- No suitable editor windows found
+  return nil, true, effective_split, "No editor windows found, creating new split"
 end
 
 --- Handles the openFile tool invocation.
@@ -229,7 +434,6 @@ local function handler(params)
   local file_path = vim.fn.expand(params.filePath)
 
   if vim.fn.filereadable(file_path) == 0 then
-    -- Using a generic error code for tool-specific operational errors
     error({ code = -32000, message = "File operation error", data = "File not found: " .. file_path })
   end
 
@@ -237,26 +441,17 @@ local function handler(params)
   local preview = params.preview or false
   local make_frontmost = params.makeFrontmost ~= false -- default true
   local select_to_end_of_line = params.selectToEndOfLine or false
-  local split = params.split or "horizontal" -- default to horizontal split
+  local split = params.split or "auto" -- default to auto (smart placement)
 
-  -- Find the best window to use (smart reuse of existing windows)
-  local target_win, should_split = find_best_window_for_file(file_path, split)
+  -- Find the best window using smart heuristics
+  local target_win, should_split, split_direction, decision_reason = find_smart_window(file_path, split)
 
   -- Build message based on what we're doing
-  local message
-  if not should_split and split ~= "none" then
-    message = "Opened file: " .. file_path .. " (reused existing window)"
-  elseif split == "vertical" then
-    message = "Opened file: " .. file_path .. " in vertical split"
-  elseif split == "horizontal" then
-    message = "Opened file: " .. file_path .. " in horizontal split"
-  else
-    message = "Opened file: " .. file_path
-  end
+  local message = "Opened file: " .. file_path .. " (" .. decision_reason .. ")"
 
   ---Opens a file, optionally creating a split first
   ---@param do_split boolean whether to create a split
-  ---@param split_type string "vertical" or "horizontal" (only used if do_split is true)
+  ---@param split_type string "vertical" or "horizontal"
   ---@param is_preview boolean whether to open in preview mode
   ---@param path string the file path to open
   local function open_file_smart(do_split, split_type, is_preview, path)
@@ -275,12 +470,12 @@ local function handler(params)
   if target_win then
     -- Open file in the target window
     vim.api.nvim_win_call(target_win, function()
-      open_file_smart(should_split, split, preview, file_path)
+      open_file_smart(should_split, split_direction, preview, file_path)
     end)
     -- Focus the window after opening if makeFrontmost is true
     if make_frontmost then
       if should_split and not preview then
-        -- The split command moved focus to the new window
+        -- The split command moved focus to the new window, get it
         vim.api.nvim_set_current_win(vim.api.nvim_get_current_win())
       else
         vim.api.nvim_set_current_win(target_win)
@@ -296,10 +491,14 @@ local function handler(params)
     local buftype = vim.api.nvim_buf_get_option(buf, "buftype")
 
     if buftype == "terminal" or buftype == "nofile" then
-      vim.cmd("vsplit")
+      if split_direction == "vertical" then
+        vim.cmd("vsplit")
+      else
+        vim.cmd("split")
+      end
     end
 
-    open_file_smart(should_split, split, preview, file_path)
+    open_file_smart(should_split, split_direction, preview, file_path)
   end
 
   -- Handle text selection by line numbers
@@ -315,7 +514,7 @@ local function handler(params)
     vim.api.nvim_buf_set_mark(0, ">", end_pos[1], end_pos[2], {})
     vim.cmd("normal! gv")
 
-    message = "Opened file and selected lines " .. start_line .. " to " .. end_line
+    message = "Opened file and selected lines " .. start_line .. " to " .. end_line .. " (" .. decision_reason .. ")"
   end
 
   -- Handle text pattern selection
@@ -339,7 +538,7 @@ local function handler(params)
       -- Find end text if provided
       if params.endText then
         for line_idx = start_line_idx + 1, #lines do
-          local line = lines[line_idx] -- Access current line directly
+          local line = lines[line_idx]
           if line then
             local col_idx = string.find(line, params.endText, 1, true)
             if col_idx then
@@ -356,7 +555,6 @@ local function handler(params)
         if end_line_idx then
           message = 'Opened file and selected text from "' .. params.startText .. '" to "' .. params.endText .. '"'
         else
-          -- End text not found, select only start text
           end_line_idx = start_line_idx
           end_col_idx = start_col_idx + string.len(params.startText) - 1
           message = 'Opened file and positioned at "'
@@ -366,7 +564,6 @@ local function handler(params)
             .. '" not found)'
         end
       else
-        -- Only start text provided
         end_line_idx = start_line_idx
         end_col_idx = start_col_idx + string.len(params.startText) - 1
         message = 'Opened file and selected text "' .. params.startText .. '"'
@@ -385,7 +582,6 @@ local function handler(params)
 
   -- Return format based on makeFrontmost parameter
   if make_frontmost then
-    -- Simple message format when makeFrontmost=true
     return {
       content = {
         {
@@ -395,13 +591,13 @@ local function handler(params)
       },
     }
   else
-    -- Detailed JSON format when makeFrontmost=false
     local buf = vim.api.nvim_get_current_buf()
     local detailed_info = {
       success = true,
       filePath = file_path,
       languageId = vim.api.nvim_buf_get_option(buf, "filetype"),
       lineCount = vim.api.nvim_buf_line_count(buf),
+      placement = decision_reason,
     }
 
     return {
