@@ -314,7 +314,8 @@ local function get_claude_command_and_env(cmd_args)
   -- Inline get_claude_command logic
   local cmd_from_config = defaults.terminal_cmd
   local base_cmd
-  if not cmd_from_config or cmd_from_config == "" then
+  local is_default_cmd = not cmd_from_config or cmd_from_config == ""
+  if is_default_cmd then
     base_cmd = "claude" -- Default if not configured
   else
     base_cmd = cmd_from_config
@@ -322,9 +323,12 @@ local function get_claude_command_and_env(cmd_args)
 
   local sse_port_value = claudecode_server_module.state.port
 
-  -- Add --ide flag when WebSocket server is running to auto-connect to IDE
+  -- Add --ide flag only for the default "claude" command.
+  -- Custom terminal_cmd (e.g. "ccb claude") may not understand --ide directly;
+  -- those wrappers should detect CLAUDE_CODE_SSE_PORT env var and forward --ide themselves.
   local cmd_string
-  if sse_port_value then
+  local append_ide = sse_port_value and is_default_cmd
+  if append_ide then
     if cmd_args and cmd_args ~= "" then
       cmd_string = base_cmd .. " --ide " .. cmd_args
     else
